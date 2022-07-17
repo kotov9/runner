@@ -1,4 +1,4 @@
-import { Executer, ExecuteContext, ExecuteFn, ExecuteFuncArgs, piplined } from './runner'
+import { Executer, ExecuteContext, ExecuteFn, ExecutionItemArgs } from './runner'
 
 enum Steps {
     CREATE_ORDER = 'CREATE_ORDER',
@@ -31,7 +31,7 @@ export function generateList(context: any): StepsExecution {
 type StepsExecution = {
     [key in Steps]?: {
         func: ExecuteFn,
-        args?: ExecuteFuncArgs,
+        args?: ExecutionItemArgs,
         context?: ExecuteContext
     }
 }
@@ -51,8 +51,6 @@ function createOrder(context: any, data: any): any {
 
     return result.data
 }
-
-const createOrderPiplined = piplined(createOrder)
 
 function updateOrder(args: any): any {
     console.log(`Run UPDATE ORDER with args:`, args)
@@ -89,7 +87,7 @@ const testRunner = async function(){
 
     await runner.executePipeline(
         [createOrder, ['request', {title: 'Good essay'}]],
-        [updateOrder, ({id}) => ([{id, test: 'ok'}])],
+        [updateOrder, (resultFromCreateOrder) => ([{id: resultFromCreateOrder.id, test: 'ok'}])],
         [hireExpert, ['request', {expertId: 666}]]
     )
     
@@ -99,3 +97,4 @@ const testRunner = async function(){
 }
 
 testRunner()
+

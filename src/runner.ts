@@ -1,4 +1,4 @@
-// ------------------ main logic
+/* Class representing a flexible pipline executor */
 export class Executer implements IExecuter {
     private lastExecutionResult: any
     private lastExecutionFunction?: string
@@ -6,15 +6,8 @@ export class Executer implements IExecuter {
     private executed?: any = {}
 
 
-    constructor() {
-        // if (!('execute' in Promise.prototype)) {
-        //     Promise.prototype.execute = async function(...args: any) {
-        //         const res = await this
-        //         return res instanceof Executer
-        //             ? res.execute.apply(res, args)
-        //             : res
-        //     }
-        // }
+    constructor(executionList?: ExecutionList) {
+        if (executionList) this.setExecutionList(executionList)
     }
 
     public setExecutionList(list: ExecutionList) {
@@ -29,37 +22,29 @@ export class Executer implements IExecuter {
         return this.lastExecutionResult
     }
 
-    public async execute(funcOrStep: ExecuteFn | keyof ExecutionList, args?: ExecuteFuncArgs) {
+    public getExecutionResults() {
+        return this.executed
+    }
 
-        let runFunc
-        let runFuncArgs
+    public async execute(executionItem: ExecutionItem, itemArgs?: ExecutionItemArgs) {
 
-        if (typeof funcOrStep !== 'function') {
-            if (!this.executionList) throw new Error(`No execution list. Can't execute ${funcOrStep}`)
-            if (!(funcOrStep in this.executionList)) throw new Error(`${funcOrStep} is absent in execuution list (${this.executionList})`)
+        let fn
+        let args
 
-            const stepToRun = this.fromList(funcOrStep)
+        if (typeof executionItem !== 'function') {
+            const fnAndArgs = this.getFuncAndArgsFromStepList(executionItem)
+            fn = fnAndArgs.fn
+            args = fnAndArgs.args
+        } else fn = executionItem
 
-            runFunc = stepToRun.func
-            runFuncArgs = typeof args === 'function'
-                ? args(this.lastExecutionResult)
-                : args
-
-            if (!runFuncArgs) {
-                runFuncArgs = typeof stepToRun.args !==  'function' 
-                ? stepToRun.args
-                : (stepToRun.args as ReturnDataHandler)?.(this.lastExecutionResult)
-            } 
-
-        } else {
-            runFunc = funcOrStep
-            runFuncArgs = typeof args !==  'function' 
-                ? args
-                : args(this.lastExecutionResult)
+        if (!args) {
+            args = typeof itemArgs !==  'function'
+                ? itemArgs
+                : itemArgs(this.lastExecutionResult)
         }
 
-        const result =  await promisifyFunctionWithoutCb(runFunc)(...(runFuncArgs || []))
-        const name = runFunc.name
+        const result =  await promisifyFunctionWithoutCb(fn)(...(args || []))
+        const name = fn.name
 
         this.lastExecutionResult = result
         this.lastExecutionFunction = name
@@ -70,20 +55,38 @@ export class Executer implements IExecuter {
         return this
     }
 
-    private fromList(key: keyof ExecutionList): ExecutionItem {
-        if (!this.executionList) throw new Error('No execution list set')
-        if (this.executionList && !this.executionList[key]) throw new Error(`No "${key}" in execution list "${JSON.stringify(this.executionList)}" set`)
-        return this.executionList[key] as unknown as ExecutionItem
-    }
-
-    public getExecutionResults() {
-        return this.executed
-    }
-
-    public async executePipeline(...arrayToExecute: [funcOrStep: ExecuteFn | keyof ExecutionList, args?: ExecuteFuncArgs][] ) {
+    public async executePipeline(...arrayToExecute: [executionItem: ExecuteFn | keyof ExecutionList, args?: ExecutionItemArgs][] ) {
         for (const [func, args] of arrayToExecute) {
             await this.execute(func, args)
         }
+    }
+
+    private fromList(key: keyof ExecutionList): ExecutionListItem {
+        if (!this.executionList) throw new Error('No execution list set')
+        if (this.executionList && !this.executionList[key]) throw new Error(`No "${key}" in execution list "${JSON.stringify(this.executionList)}" set`)
+        return this.executionList[key] as unknown as ExecutionListItem
+    }
+
+    private getFuncAndArgsFromStepList(executionItem: keyof ExecutionList): {fn: ExecuteFn, args?: ExecutionItemArgs} {
+        if (!this.executionList) throw new Error(`No execution list. Can't execute ${executionItem}`)
+
+        let fn
+        let args
+
+        if (!this.executionList) throw new Error(`No execution list. Can't execute ${executionItem}`)
+        if (!(executionItem in this.executionList)) throw new Error(`${executionItem} is absent in execuution list (${this.executionList})`)
+
+        const stepToRun = this.fromList(executionItem)
+
+        fn = stepToRun.func
+
+        if (stepToRun.args) {
+            args = typeof stepToRun.args !==  'function'
+                ? stepToRun.args
+                : (stepToRun.args as ReturnDataHandler)?.(this.lastExecutionResult)
+        }
+
+        return {fn, args}
     }
 }
 
@@ -98,43 +101,27 @@ type UsualFn = (...args: any[]) => any
 
 export type ExecuteFn = AsyncFn | UsualFn
 export type ReturnDataHandler = (prevResult?: any) => any
-export type ExecuteFuncArgs = any[] | ReturnDataHandler
+export type ExecutionItemArgs = any[] | ReturnDataHandler
 export type ExecuteContext = any
+
+export type ExecutionItem = ExecuteFn | keyof ExecutionList
+export type ExecutionFunction = (executionItem: ExecutionItem, args?: ExecutionItemArgs) => Promise<any>
 
 
 interface IExecuter {
-    execute: (funcOrStep: ExecuteFn | keyof ExecutionList, args?: ExecuteFuncArgs) => Promise<any>,
-    executePipeline: (...arrayToExecute: [funcOrStep: ExecuteFn | keyof ExecutionList, args?: ExecuteFuncArgs][]) => Promise<any>
+    execute: ExecutionFunction
+    executePipeline: (...arrayToExecute: [executionItem: ExecuteFn | keyof ExecutionList, args?: ExecutionItemArgs][]) => Promise<any>
 }
 
 type ExecutionList = {
-    [key: string]: ExecutionItem
+    [key: string]: ExecutionListItem
 }
 
-type ExecutionItem = {
+type ExecutionListItem = {
     func: ExecuteFn,
-    args?: ExecuteFuncArgs,
+    args?: ExecutionItemArgs,
     context?: ExecuteContext
 }
-
-
-export function piplined(func: any): any {
-    return (...args: any[]) => func(...args)
-}
-
-
-
-
-// interface RunnerPromise<T> {
-//     execute: (func: ExecuteFn, args?: ExecuteFuncArgs) => Promise<any>
-// }
-// const RunnerPromise = Promise.bind(null)
-// RunnerPromise.resolve = Promise.resolve
-// RunnerPromise.reject = Promise.reject
-// //@ts-ignore
-// RunnerPromise.prototype.execute = (...args: any) => RunnerPromise.prototype.then((runner: Runner) => runner.execute(args))
-
-// console.log(RunnerPromise.resolve(5).finally(() => console.log("DONE")))
 
 
 
